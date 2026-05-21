@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>數位教學資源索引</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --url-accent: #059669; /* 給 URL 檔案不同的顏色區分 */
+        }
+
+        body {
+            font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; color: var(--primary-color); margin-bottom: 40px; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #e2e8f0;
+        }
+
+        .card:hover { transform: translateY(-8px); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+
+        /* 標籤顯示檔案類型 */
+        .type-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 4px 8px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            z-index: 1;
+        }
+
+        .thumbnail {
+            width: 100%;
+            height: 180px;
+            background: #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            background-size: cover;
+            background-position: center;
+        }
+
+        .content { padding: 20px; text-align: center; flex-grow: 1; }
+        .content h3 { margin: 0 0 10px 0; font-size: 1.25rem; word-break: break-all; }
+        .content p { font-size: 0.85rem; color: #64748b; margin: 0; }
+
+        .qr-container {
+            display: flex;
+            justify-content: center;
+            padding: 15px;
+            background: #f1f5f9;
+        }
+
+        .btn-link {
+            display: block;
+            padding: 12px;
+            background: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            text-align: center;
+            transition: background 0.2s;
+        }
+
+        .btn-link.is-url { background: var(--url-accent); }
+        .btn-link:hover { opacity: 0.9; }
+
+        #loader { text-align: center; font-size: 1.2rem; padding: 50px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>網頁導覽</h1>
+    <div id="loader">正在讀取檔案清單...</div>
+    <div class="grid" id="main-grid"></div>
+</div>
+
+<script>
+    const CONFIG = {
+        username: 'DuoMei-Eva',
+        repo: 'Vocational',
+        folder: ''
+    };
+
+    const grid = document.getElementById('main-grid');
+    const loader = document.getElementById('loader');
+
+    async function init() {
+        try {
+            const apiUrl = `https://api.github.com/repos/${CONFIG.username}/${CONFIG.repo}/contents/${CONFIG.folder}`;
+            const response = await fetch(apiUrl);
+            const files = await response.json();
+
+            if (!Array.isArray(files)) throw new Error('無法讀取資料');
+
+            loader.style.display = 'none';
+
+            // 過濾出 .html 和 .url 檔案
+            const targetFiles = files.filter(f => 
+                (f.name.endsWith('.html') || f.name.endsWith('.url')) && f.name !== 'index.html'
+            );
+
+            // 使用 for...of 確保非同步解析順序
+            for (let i = 0; i < targetFiles.length; i++) {
+                await processFile(targetFiles[i], i);
+            }
+
+        } catch (error) {
+            loader.innerHTML = `讀取失敗: ${error.message}`;
+        }
+    }
+
+    async function processFile(file, index) {
+        let finalUrl = "";
+        let title = "";
+        let isExternal = false;
+
+        if (file.name.endsWith('.html')) {
+            // HTML 處理邏輯
+            title = file.name.replace('.html', '');
+            const baseUrl = `https://${CONFIG.username}.github.io/${CONFIG.repo}/`;
+            const fileNameEncoded = encodeURI(file.name);
+            finalUrl = baseUrl + (CONFIG.folder ? CONFIG.folder + '/' : '') + fileNameEncoded;
+        } 
+        else if (file.name.endsWith('.url')) {
+            // .url 檔案處理邏輯
+            title = file.name.replace('.url', '');
+            isExternal = true;
+            try {
+                // 抓取 .url 檔案內容
+                const res = await fetch(file.download_url);
+                const text = await res.text();
+                // 用正規表達式找 URL= 後面的網址
+                const match = text.match(/URL=(.+)/i);
+                if (match && match[1]) {
+                    finalUrl = match[1].trim();
+                } else {
+                    return; // 格式不對跳過
+                }
+            } catch (e) {
+                console.error("解析 .url 失敗:", file.name);
+                return;
+            }
+        }
+
+        createCard(title, finalUrl, index, isExternal);
+    }
+
+    function createCard(title, fileUrl, index, isExternal) {
+        const cardId = `qr-${index}`;
+        const card = document.createElement('div');
+        card.className = 'card';
+        
+        card.innerHTML = `
+            <div class="thumbnail" id="thumb-${index}">
+                <span class="type-badge">${isExternal ? '外部連結' : '內部網頁'}</span>
+            </div>
+            <div class="content">
+                <h3>${title}</h3>
+                <p>${new URL(fileUrl).hostname}</p>
+            </div>
+            <div class="qr-container">
+                <div id="${cardId}"></div>
+            </div>
+            <a href="${fileUrl}" target="_blank" class="btn-link ${isExternal ? 'is-url' : ''}">
+                ${isExternal ? '前往連結' : '開啟網頁'}
+            </a>
+        `;
+        grid.appendChild(card);
+
+        // 生成 QR Code
+        new QRCode(document.getElementById(cardId), {
+            text: fileUrl,
+            width: 120,
+            height: 120,
+            colorDark : "#1e293b",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.M
+        });
+
+        // 縮圖
+        const thumbDiv = document.getElementById(`thumb-${index}`);
+        const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(fileUrl)}?w=400`;
+        thumbDiv.style.backgroundImage = `url('${screenshotUrl}')`;
+    }
+
+    init();
+</script>
+
+</body>
+</html>
